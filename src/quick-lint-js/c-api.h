@@ -29,8 +29,8 @@ struct qljs_vscode_diagnostic {
   int end_line;
   int end_character;
 };
-qljs_vscode_document* qljs_vscode_create_source_document(
-    qljs_vscode_workspace*);
+qljs_vscode_document* qljs_vscode_create_source_document(qljs_vscode_workspace*,
+                                                         const char* file_path);
 void qljs_vscode_destroy_document(qljs_vscode_document*);
 void qljs_vscode_replace_text(qljs_vscode_document*, int start_line,
                               int start_character, int end_line,

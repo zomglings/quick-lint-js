@@ -8,6 +8,7 @@
 #include <quick-lint-js/c-api-error-reporter.h>
 #include <quick-lint-js/c-api.h>
 #include <quick-lint-js/char8.h>
+#include <quick-lint-js/configuration-loader.h>
 #include <quick-lint-js/configuration.h>
 #include <quick-lint-js/document.h>
 #include <quick-lint-js/error.h>
@@ -28,7 +29,7 @@ class qljs_document_base {
     this->error_reporter_.set_input(this->document_.string(),
                                     &this->document_.locator());
     parser p(this->document_.string(), &this->error_reporter_);
-    linter l(&this->error_reporter_, &this->config_.globals());
+    linter l(&this->error_reporter_, &this->config_->globals());
     // TODO(strager): Use parse_and_visit_module_catching_unimplemented instead
     // of parse_and_visit_module to avoid crashing on QLJS_PARSER_UNIMPLEMENTED.
     p.parse_and_visit_module(l);
@@ -36,21 +37,29 @@ class qljs_document_base {
     return this->error_reporter_.get_diagnostics();
   }
 
+  static quick_lint_js::configuration* get_default_config_file() {
+    static quick_lint_js::configuration default_config;
+    return &default_config;
+  }
+
   quick_lint_js::document<Locator> document_;
   ErrorReporter error_reporter_;
-  configuration config_;
+  configuration* config_ = get_default_config_file();
 };
 }
 }
 
 struct qljs_vscode_workspace {
  public:
-  qljs_vscode_document* create_source_document();
+  qljs_vscode_document* create_source_document(const char* file_path);
 
   void destroy_document(qljs_vscode_document*);
 
  private:
   std::vector<std::unique_ptr<qljs_vscode_document>> documents_;
+  quick_lint_js::basic_configuration_filesystem fs_;
+  quick_lint_js::configuration_loader config_loader_ =
+      quick_lint_js::configuration_loader(&this->fs_);
 };
 
 qljs_vscode_workspace* qljs_vscode_create_workspace() {
@@ -68,8 +77,18 @@ struct qljs_vscode_document final
           quick_lint_js::c_api_error_reporter<qljs_vscode_diagnostic,
                                               quick_lint_js::lsp_locator>> {
  public:
-  explicit qljs_vscode_document(qljs_vscode_workspace* workspace)
-      : workspace(workspace) {}
+  explicit qljs_vscode_document(
+      qljs_vscode_workspace* workspace,
+      quick_lint_js::configuration_loader* config_loader, const char* file_path)
+      : workspace(workspace) {
+    auto config_file =
+        config_loader->watch_and_load_for_file(file_path, /*token=*/this);
+    if (config_file.ok()) {
+      if (*config_file) {
+        this->config_ = &(*config_file)->config;
+      }
+    }
+  }
 
   void replace_text(int start_line, int start_character, int end_line,
                     int end_character,
@@ -87,9 +106,11 @@ struct qljs_vscode_document final
   qljs_vscode_workspace* workspace;
 };
 
-qljs_vscode_document* qljs_vscode_workspace::create_source_document() {
-  std::unique_ptr<qljs_vscode_document>& doc = this->documents_.emplace_back(
-      std::make_unique<qljs_vscode_document>(this));
+qljs_vscode_document* qljs_vscode_workspace::create_source_document(
+    const char* file_path) {
+  std::unique_ptr<qljs_vscode_document>& doc =
+      this->documents_.emplace_back(std::make_unique<qljs_vscode_document>(
+          this, &this->config_loader_, file_path));
   return doc.get();
 }
 
@@ -104,8 +125,8 @@ void qljs_vscode_workspace::destroy_document(qljs_vscode_document* doc) {
 }
 
 qljs_vscode_document* qljs_vscode_create_source_document(
-    qljs_vscode_workspace* workspace) {
-  return workspace->create_source_document();
+    qljs_vscode_workspace* workspace, const char* file_path) {
+  return workspace->create_source_document(file_path);
 }
 
 void qljs_vscode_destroy_document(qljs_vscode_document* p) {

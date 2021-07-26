@@ -4,14 +4,24 @@
 #include <gtest/gtest.h>
 #include <quick-lint-js/c-api.h>
 #include <quick-lint-js/char8.h>
+#include <quick-lint-js/file.h>
+#include <quick-lint-js/filesystem-test.h>
 
 namespace quick_lint_js {
 namespace {
-TEST(test_c_api_vscode, empty_document_has_no_diagnostics) {
+class test_c_api_vscode : public ::testing::Test, protected filesystem_test {};
+
+TEST_F(test_c_api_vscode, empty_document_has_no_diagnostics) {
+  std::string project_dir = this->make_temporary_directory();
+  std::string js_file = project_dir + "/test.js";
+
   qljs_vscode_workspace* workspace = qljs_vscode_create_workspace();
-  qljs_vscode_document* p = qljs_vscode_create_source_document(workspace);
+  qljs_vscode_document* p =
+      qljs_vscode_create_source_document(workspace, js_file.c_str());
+
   const qljs_vscode_diagnostic* diagnostics = qljs_vscode_lint(p);
   EXPECT_EQ(diagnostics[0].message, nullptr);
+
   qljs_vscode_destroy_document(p);
   qljs_vscode_destroy_workspace(workspace);
 }
@@ -23,9 +33,13 @@ TEST(test_c_api_web_demo, empty_document_has_no_diagnostics) {
   qljs_web_demo_destroy_document(p);
 }
 
-TEST(test_c_api_vscode, lint_error_after_text_insertion) {
+TEST_F(test_c_api_vscode, lint_error_after_text_insertion) {
+  std::string project_dir = this->make_temporary_directory();
+  std::string js_file = project_dir + "/test.js";
+
   qljs_vscode_workspace* workspace = qljs_vscode_create_workspace();
-  qljs_vscode_document* p = qljs_vscode_create_source_document(workspace);
+  qljs_vscode_document* p =
+      qljs_vscode_create_source_document(workspace, js_file.c_str());
 
   const char8* document_text = u8"let x;let x;";
   qljs_vscode_replace_text(p, /*start_line=*/0, /*start_character=*/0,
@@ -65,9 +79,13 @@ TEST(test_c_api_web_demo, lint_error_after_text_insertion) {
   qljs_web_demo_destroy_document(p);
 }
 
-TEST(test_c_api_vscode, lint_new_error_after_second_text_insertion) {
+TEST_F(test_c_api_vscode, lint_new_error_after_second_text_insertion) {
+  std::string project_dir = this->make_temporary_directory();
+  std::string js_file = project_dir + "/test.js";
+
   qljs_vscode_workspace* workspace = qljs_vscode_create_workspace();
-  qljs_vscode_document* p = qljs_vscode_create_source_document(workspace);
+  qljs_vscode_document* p =
+      qljs_vscode_create_source_document(workspace, js_file.c_str());
 
   const char8* document_text = u8"let x;";
   qljs_vscode_replace_text(p, /*start_line=*/0, /*start_character=*/0,
@@ -119,9 +137,13 @@ TEST(test_c_api_web_demo, lint_new_error_after_second_text_insertion) {
   qljs_web_demo_destroy_document(p);
 }
 
-TEST(test_c_api_vscode, diagnostic_severity) {
+TEST_F(test_c_api_vscode, diagnostic_severity) {
+  std::string project_dir = this->make_temporary_directory();
+  std::string js_file = project_dir + "/test.js";
+
   qljs_vscode_workspace* workspace = qljs_vscode_create_workspace();
-  qljs_vscode_document* p = qljs_vscode_create_source_document(workspace);
+  qljs_vscode_document* p =
+      qljs_vscode_create_source_document(workspace, js_file.c_str());
 
   const char8* document_text = u8"let x;let x;\nundeclaredVariable;";
   qljs_vscode_replace_text(p, /*start_line=*/0, /*start_character=*/0,
@@ -142,16 +164,42 @@ TEST(test_c_api_vscode, diagnostic_severity) {
   qljs_vscode_destroy_workspace(workspace);
 }
 
-TEST(test_c_api_vscode,
-     destroying_workspace_makes_destroying_documents_unnecessary) {
+TEST_F(test_c_api_vscode,
+       destroying_workspace_makes_destroying_documents_unnecessary) {
+  std::string project_dir = this->make_temporary_directory();
+  std::string js_file_1 = project_dir + "/test-1.js";
+  std::string js_file_2 = project_dir + "/test-2.js";
+
   qljs_vscode_workspace* workspace = qljs_vscode_create_workspace();
   [[maybe_unused]] qljs_vscode_document* doc1 =
-      qljs_vscode_create_source_document(workspace);
+      qljs_vscode_create_source_document(workspace, js_file_1.c_str());
   [[maybe_unused]] qljs_vscode_document* doc2 =
-      qljs_vscode_create_source_document(workspace);
+      qljs_vscode_create_source_document(workspace, js_file_2.c_str());
   qljs_vscode_destroy_workspace(workspace);
   // Leak checkers such as AddressSantizers would report a leak and fail the
   // test.
+}
+
+TEST_F(test_c_api_vscode, loads_config_file) {
+  std::string project_dir = this->make_temporary_directory();
+  std::string js_file = project_dir + "/test.js";
+  std::string config_file = project_dir + "/quick-lint-js.config";
+  write_file(config_file, u8R"({"globals": {"testGlobalVariable": true}})");
+
+  qljs_vscode_workspace* workspace = qljs_vscode_create_workspace();
+  qljs_vscode_document* p =
+      qljs_vscode_create_source_document(workspace, js_file.c_str());
+
+  const char8* document_text = u8"testGlobalVariable;";
+  qljs_vscode_replace_text(p, /*start_line=*/0, /*start_character=*/0,
+                           /*end_line=*/1, /*end_character=*/0, document_text,
+                           strlen(document_text));
+  const qljs_vscode_diagnostic* diagnostics = qljs_vscode_lint(p);
+  EXPECT_EQ(diagnostics[0].message, nullptr);
+  EXPECT_EQ(diagnostics[0].code, nullptr);
+
+  qljs_vscode_destroy_document(p);
+  qljs_vscode_destroy_workspace(workspace);
 }
 }
 }
